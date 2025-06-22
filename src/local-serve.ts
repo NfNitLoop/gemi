@@ -1,14 +1,16 @@
 import { command } from "cmd-ts";
 
 import * as cts from "cmd-ts"
-import { Hono } from "@hono/hono"
 import { logger } from "@hono/hono/logger"
-import { serveStatic } from "@hono/hono/deno"
-import { createMiddleware } from "@hono/hono/factory"
-import {html} from "@hono/hono/html"
+import { createMiddleware, createFactory } from "@hono/hono/factory"
+import { html } from "@hono/hono/html"
+import { accepts } from "@hono/hono/accepts"
+
+import * as honoMime from "@hono/hono/utils/mime"
 
 import * as gmi from "./lib/gemtext.ts"
 import { HtmlEscapedString } from "@hono/hono/utils/html";
+import { Result } from "./lib/result.ts";
 
 export const localServer = command({
     handler: runLocalServer,
@@ -20,32 +22,97 @@ export const localServer = command({
     },
 })
 
-
 type Args = {
     port: number
     path: string
 }
 
 function runLocalServer({port, path}: Args) {
-    const app = new Hono({strict: true})
 
+    const staticFiles = new StaticFiles({
+        rootDir: path,
+        extraMimes: gmi.mimeTypes,
+        indexes: [
+            ...gmi.extensions.map(ext => `index${ext}`),
+            'index.html',
+            'index.htm',
+        ],
+        listDirectory: showListing
+    })
+
+    const app = factory.createApp()
     // Must register middleware before routes:
     app.use(logger())
     app.use(renderGemtext)
 
-    app.get("/", (c) => { 
-        return new Response(`Hello! ... ${c.req.url}`)
+
+    app.get(`/:pathRest{.*}`, async (c, next) => {
+        const response = await staticFiles.serveFile(c.req.param().pathRest)
+        if (!response) {
+            return next()
+        }
+        return response
     })
 
-    app.get(`/:pathRest{.*}`, serveStatic({
-        root: path,
-        mimes: gmi.mimeTypes,
-    }))
+    app.get("/", async (_c, next) => { 
+        const response = await staticFiles.serveFile("")
+        if (response) {
+            return response
+        }
+        return next()
+    })
 
-    // TODO: Add directory listings here.
-    app.get(`/:pathRest{.*}`, (c) => c.text('not found'))
+    app.notFound((c) => {
+        return c.text('Not found', 404)
+    })
+
 
     Deno.serve({port}, app.fetch)
+}
+
+const factory = createFactory({
+    defaultAppOptions: {
+        strict: true
+    }
+})
+
+/**
+ * Returns a handler that can 
+ */
+async function showListing(args: {fullPath: string, relPath: string}): Promise<Response> {
+    const {fullPath, relPath} = args
+
+    console.debug("showListing", {fullPath, relPath})
+
+    const lines = [
+        `# Directory Listing`,
+        '',
+        `### ${relPath || '/'}`,
+        '',
+    ]
+    const dir = Deno.readDir(fullPath)
+    for await (const entry of dir) {
+        if (entry.isSymlink) { continue }
+        const name = entry.name + (entry.isDirectory ? "/" : "")
+        lines.push(`=> ${encodeURI(name)}`)
+    }
+
+    return new Response(lines.join("\n"), {
+        headers: {
+            "Content-Type": gmi.mimeType
+        }
+    })
+}
+
+async function fsStat(path: string): Promise<Deno.FileInfo | null> {
+    const result = await Result.try(Deno.stat(path))
+    if (result.isError) {
+        if (result.error instanceof Deno.errors.NotFound) {
+            return null
+        }
+        throw result.error
+    }
+    return result.value
 }
 
 /**
@@ -60,19 +127,30 @@ const renderGemtext = createMiddleware(async (c, next) => {
         // nothing to do:
         return
     }
-    console.log({isGemini, contentType})
+
+    const outputType = accepts(c, {
+        header: "Accept",
+        supports: [
+            gmi.mimeType,
+            "text/html"
+        ],
+        // Most browsers don't know how to render gemini.
+        default: "text/html"
+    })
+
+    if (outputType == gmi.mimeType) {
+        // input & output agree! 🎉
+        return
+    }
+
     // check accepts encoding. Pass through gemini unmodified to clients that know it.
 
     const oldResponse = c.res
-    const {body} = oldResponse
 
     // TODO: I can probably do this in a streaming fashion, spitting out an HTML head, converting by lines, and then an HTML footer.
     // For now, just doing a whole-document conversion:
     const gemText = await oldResponse.text()
-    console.log({gemText})
-
     const gemLines = [...gmi.parseLines(gemText)]
-    console.log({gemLines})
 
     c.res = new Response(await htmlDoc([...gmiToHtml(gemLines)]), {
         headers: {
@@ -134,35 +212,100 @@ html {
 body {
     padding: 1rem;
     margin: 0 auto;
-    &:not(:has(pre)) {
-        max-width: 45rem;
-    }
+    &:not(:has(pre)) { max-width: 45rem; }
 }
-
 p, h1, h2, h3, pre {
     margin: 0 0;
     min-height: 1em;
 }
-
-
-body > h1:first-child {
-    text-align: center;
-}
-
-p {
-    line-height: 1.5;
-}
+body > h1:first-child { text-align: center; }
+p { line-height: 1.5; }
 </style>
 `
 
+// Hono's serveStatic doesn't seem to serve index files.
+// Also, you can't easily call it to just serve a single file as needed.
+// Plus, it uses sync functions. (😱)
+// So, writing my own handler here.
+class StaticFiles {
+    rootDir: string
+    indexes: string[]
+    mimes: { [x: string]: string; };
+    listDirectory?: (args: {relPath: string, fullPath: string}) => Promise<Response>
 
-// p:has(a[href])::before {
-//     content: "=> ";
-//     font-family: monospace;
-//     // font-weight: bold;
-//     font-size: 1.1em;
-// }
+    constructor(args: {
+        rootDir: string,
+        extraMimes?: Record<string, string>,
+        indexes?: string[],
+        listDirectory?: StaticFiles["listDirectory"]
+    }) {
+        const {rootDir, extraMimes, indexes, listDirectory} = args
+        
+        this.rootDir = rootDir
+        this.indexes = indexes ?? []
+        this.mimes = {
+            ...honoMime.mimes,
+            ...extraMimes
+        }
+        this.listDirectory = listDirectory
+    }
 
-// pre {
-//     overflow-x: auto;
-// }
+    // TODO: Disallow /../ !!!!
+    async serveFile(relPath: string): Promise<Response|null> {
+        const fullPath = this.#join(this.rootDir, relPath)
+        const file = await openFile(fullPath)
+        if (!file) { 
+            // Neither a file nor directory
+            return null
+        }
+        const stat = await file.stat()
+        console.debug({relPath, fullPath})
+        console.log({stat})
+        if (stat.isFile) {
+            // TODO: Default to utf-8 for text types w/o encodings.
+            const mimeType = honoMime.getMimeType(fullPath, this.mimes) ?? "application/octet-stream"
+
+            return new Response(
+                file.readable,
+                { headers: { "Content-Type": mimeType } }
+            )
+        }
+
+        if (!stat.isDirectory) {
+            // No support for symlinks. (yet)
+            return null
+        }
+        if (!relPath.endsWith("/") && relPath != "") {
+            const newPath = relPath + "/"
+            console.log("redirecting to", newPath)
+            return new Response("", {
+                headers: {"Location": newPath},
+                status: 302 // temporary redirect
+            })
+        }
+
+        // We're in a directory, and have a trailing slash. 
+        // List files:
+        if (!this.listDirectory) {
+            return null
+        }
+        return this.listDirectory({relPath, fullPath})
+    }
+
+    #join(path1: string, path2: string) {
+        // Remove trailing/leading slashes to join with a slash.
+        // TODO: Handle how this works on Windows?
+        return path1.replace(/\/+$/, "") + "/" + path2.replace(/^\/+/, "")
+    }
+}
+
+async function openFile(path: string): Promise<Deno.FsFile | null> {
+    const result = await Result.try(Deno.open(path, {read: true, }))
+    if (result.isError) {
+        if (result.error instanceof Deno.errors.NotFound) {
+            return null
+        }
+        throw result.error
+    }
+    return result.value
+}

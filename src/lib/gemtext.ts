@@ -128,10 +128,10 @@ function parseLink(line: string): Link | null {
     const match = LINK_RE.exec(line)
     if (!match) { return null }
     const {urlOrPath, linkText} = match.groups!
-    // TODO: URL-decode the URL?
+    
     return {
         type: "link",
-        urlOrPath,
+        urlOrPath: decodeURI(urlOrPath),
         linkText: linkText || undefined
     }
 }
