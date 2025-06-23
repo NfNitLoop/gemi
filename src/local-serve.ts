@@ -11,6 +11,7 @@ import * as honoMime from "@hono/hono/utils/mime"
 import * as gmi from "./lib/gemtext.ts"
 import { HtmlEscapedString } from "@hono/hono/utils/html";
 import { Result } from "./lib/result.ts";
+import { TextLineStream, toTransformStream } from "@std/streams";
 
 export const localServer = command({
     handler: runLocalServer,
@@ -132,16 +133,26 @@ const renderGemtext = createMiddleware(async (c, next) => {
         return
     }
 
-    // check accepts encoding. Pass through gemini unmodified to clients that know it.
-
     const oldResponse = c.res
+
+    const {body} = oldResponse
+    if (!body) {
+        console.warn("old response had no body!?")
+        return
+    }
+
+    const newStream = body.pipeThrough(new TextDecoderStream())
+        .pipeThrough(new TextLineStream())
+        .pipeThrough(gmi.newStreamParser())
+        .pipeThrough(toTransformStream(gmiLinesToHtml))
+        .pipeThrough(new TextEncoderStream())
 
     // TODO: I can probably do this in a streaming fashion, spitting out an HTML head, converting by lines, and then an HTML footer.
     // For now, just doing a whole-document conversion:
-    const gemText = await oldResponse.text()
-    const gemLines = [...gmi.parseLines(gemText)]
+    // const gemText = await oldResponse.text()
+    // const gemLines = [...gmi.parseDocument(gemText)]
 
-    c.res = new Response(await htmlDoc([...gmiToHtml(gemLines)]), {
+    c.res = new Response(newStream, {
         headers: {
             "Content-Type": "text/html; charset=utf-8"
         }
@@ -149,8 +160,17 @@ const renderGemtext = createMiddleware(async (c, next) => {
     // TODO: Copy other headers?
 })
 
-function * gmiToHtml(lines: Iterable<gmi.Line>): Generator<HtmlEscapedString | Promise<HtmlEscapedString>> {
-    for (const line of lines) {
+async function * gmiLinesToHtml(lines: AsyncIterable<gmi.Line>): AsyncGenerator<string> {
+    yield html`<!doctype html>\n`
+    yield html`<html>\n`
+    yield html`<head>\n`
+    yield gemStyle
+    yield html`</head>\n`
+    yield html`<body>\n`;
+    
+    // TODO: Peek at the first line to see if it's a title.
+
+    for await (const line of lines) {
         if (line.type == "text") {
             yield html`<p>${line.text}</p>\n`
         } else if (line.type == "heading") {
@@ -171,24 +191,8 @@ function * gmiToHtml(lines: Iterable<gmi.Line>): Generator<HtmlEscapedString | P
             throw new Error(`Unhandled line type: ${(lineType as gmi.Line).type}`)
         }
     }
-}
-
-type HtmlOut = ReturnType<typeof html>
-
-function htmlDoc(parts: HtmlOut[]): HtmlOut {
-    const doc = [
-        html`<!doctype html>\n`,
-        html`<html>\n`,
-        html`<head>\n`,
-        gemStyle,
-        html`</head>`,
-        html`<body>`,
-        html`${parts}`,
-        html`</body>`,
-        html`</html>`,
-    ]
-
-    return html`${doc}`
+    yield html`</body>`
+    yield html`</html>`
 }
 
 const gemStyle = html`

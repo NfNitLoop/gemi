@@ -6,6 +6,8 @@
  * 
  */
 
+import {toTransformStream} from "@std/streams"
+
 export const extensions = [`.gmi`, `.gmni`, `.gemini`] as const
 export const mimeType = "text/gemini"
 export const mimeTypes = {
@@ -23,7 +25,7 @@ export function hasExtension(fileName: string): boolean {
 }
 
 export function parseDoc(document: string): GemtextDoc {
-    const lines = [...parseLines(document)]
+    const lines = [...parseDocument(document)]
     const firstLine: Line|undefined = lines[0]
     const title = (
         firstLine && firstLine.type == "heading" && firstLine.level == 1
@@ -45,11 +47,71 @@ export type GemtextDoc = {
     readonly links: Readonly<Link[]>
 }
 
+export function newStreamParser(): TransformStream<string, Line> {
+    return toTransformStream(async function* geminiLinegenerator(lines) {
+        const {parseLine} = pushParser()
+        for await (const line of lines) {
+            const lineOut = parseLine(line)
+            if (lineOut) { yield lineOut }
+        }
+    })
+}
 
+/**
+ * Make a new push parser to parse a gemfile.
+ * A push parser is usable from async or sync contexts.
+*/
+export function pushParser() {
+    let parsingPre: ParsingPre  = undefined;
+    const parseLine = (line: string): Line | null => {
+        const pre = parsePre(line)
+        if (pre) {
+            if (parsingPre) { // Wrap up & yield parsing.
+                if (pre.info) {
+                    throw new Error(`Expected end of preformatted block but found: ${line}`)
+                }
+                const outValue = {
+                    type: "pre",
+                    lines: parsingPre.lines,
+                    info: parsingPre.info
+                } as const
+                parsingPre = undefined
+                return outValue
+            } else { // Start parsing new pre block:
+                parsingPre = {
+                    info: pre.info,
+                    lines: []
+                }
+            }
+            return null
+        }
+        if (parsingPre) {
+            parsingPre.lines.push(line)
+            return null
+        }
+        const link = parseLink(line)
+        if (link) {
+            return link
+        }
+        const heading = parseHeading(line)
+        if (heading) {
+            return heading
+        }
+        return {
+            type: "text",
+            text: line
+        }
+    }
+
+    // TODO: add a done to return any dangling <pre>s.
+    return {parseLine} 
+}
+
+// TODO: Use pushParser.
 /**
  * Parse and yield lines of a Gemtext.
  */
-export function * parseLines(document: string): Generator<Line> {
+export function * parseDocument(document: string): Generator<Line> {
     let parsingPre: ParsingPre  = undefined;
     for (const line of document.split(/\n/)) {
         const pre = parsePre(line)
