@@ -6,8 +6,6 @@
  * 
  */
 
-import { parse } from "cmd-ts";
-
 export const extensions = [`.gmi`, `.gmni`, `.gemini`] as const
 export const mimeType = "text/gemini"
 export const mimeTypes = {

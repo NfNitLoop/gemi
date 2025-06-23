@@ -82,7 +82,6 @@ const factory = createFactory({
 async function showListing(args: {fullPath: string, relPath: string}): Promise<Response> {
     const {fullPath, relPath} = args
 
-    console.debug("showListing", {fullPath, relPath})
 
     const lines = [
         `# Directory Listing`,
@@ -102,17 +101,6 @@ async function showListing(args: {fullPath: string, relPath: string}): Promise<R
             "Content-Type": gmi.mimeType
         }
     })
-}
-
-async function fsStat(path: string): Promise<Deno.FileInfo | null> {
-    const result = await Result.try(Deno.stat(path))
-    if (result.isError) {
-        if (result.error instanceof Deno.errors.NotFound) {
-            return null
-        }
-        throw result.error
-    }
-    return result.value
 }
 
 /**
@@ -259,8 +247,6 @@ class StaticFiles {
             return null
         }
         const stat = await file.stat()
-        console.debug({relPath, fullPath})
-        console.log({stat})
         if (stat.isFile) {
             // TODO: Default to utf-8 for text types w/o encodings.
             const mimeType = honoMime.getMimeType(fullPath, this.mimes) ?? "application/octet-stream"
@@ -277,14 +263,22 @@ class StaticFiles {
         }
         if (!relPath.endsWith("/") && relPath != "") {
             const newPath = relPath + "/"
-            console.log("redirecting to", newPath)
             return new Response("", {
                 headers: {"Location": newPath},
                 status: 302 // temporary redirect
             })
         }
 
-        // We're in a directory, and have a trailing slash. 
+        // We're in a directory, and have a trailing slash.
+        // Try index files:
+        for (const index of this.indexes) {
+            const indexPath = this.#join(relPath, index)
+            const response = await this.serveFile(indexPath)
+            if (response) {
+                return response
+            }
+        }
+
         // List files:
         if (!this.listDirectory) {
             return null
