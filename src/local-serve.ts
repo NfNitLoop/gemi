@@ -93,6 +93,7 @@ async function showListing(args: {fullPath: string, relPath: string}): Promise<R
     for await (const entry of dir) {
         if (entry.isSymlink) { continue }
         const name = entry.name + (entry.isDirectory ? "/" : "")
+        if (name.startsWith(".")) { continue }
         lines.push(`=> ${encodeURI(name)}`)
     }
 
