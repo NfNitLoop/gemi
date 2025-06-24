@@ -58,9 +58,10 @@ export function newStreamParser(): TransformStream<string, Line> {
 }
 
 /**
- * Make a new push parser to parse a gemfile.
- * A push parser is usable from async or sync contexts.
-*/
+ * A stateful parser for a Gemtext.
+ * 
+ * Call the returned parseLine() with each line. May return a Gemtext Line if it was parsed.
+ */
 export function pushParser() {
     let parsingPre: ParsingPre  = undefined;
     const parseLine = (line: string): Line | null => {
@@ -104,10 +105,10 @@ export function pushParser() {
     }
 
     // TODO: add a done to return any dangling <pre>s.
+    // TODO: Maybe allow yielding more than one line in the case of ending quote blocks?
     return {parseLine} 
 }
 
-// TODO: Use pushParser.
 /**
  * Parse and yield lines of a Gemtext.
  */
@@ -198,6 +199,8 @@ function parseLink(line: string): Link | null {
 
 const LINK_RE = /^=> (?<urlOrPath>\S+)\s*(?<linkText>.*)$/
 
+// TODO: Quoted text. Grouping into blocks might need a parser modification.
+// TODO: Bulleted list items.
 export type Line = Heading | Text | Link | Preformatted
 
 export type Text = {

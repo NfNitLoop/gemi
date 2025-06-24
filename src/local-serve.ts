@@ -125,7 +125,10 @@ const renderGemtext = createMiddleware(async (c, next) => {
             "text/html"
         ],
         // Most browsers don't know how to render gemini.
-        default: "text/html"
+        // default: "text/html"
+        // However, they generally provide an Accept header with html.
+        // For anything else (ex: curl) just return Gemtext:
+        default: gmi.mimeType
     })
 
     if (outputType == gmi.mimeType) {
@@ -201,6 +204,7 @@ html {
     font-family: sans-serif;
     background-color: rgb(255, 255, 209);
     opacity: 0.75;
+    word-wrap: break-word;
 }
 body {
     padding: 1rem;

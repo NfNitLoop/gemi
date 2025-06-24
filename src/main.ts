@@ -5,6 +5,8 @@ import * as cts from "cmd-ts"
 import {} from "cmd-ts"
 import { PrivateKey } from "./lib/keys.ts";
 import { localServer } from "./local-serve.ts";
+import { hash } from "./commands/hash.ts"
+import { sign } from "./commands/sign.ts";
 
 const example = cts.command({
   name: "whatever, man",
@@ -36,7 +38,9 @@ const app = cts.subcommands({
   cmds: {
     newKey,
     localServer,
+    hash,
     example,
+    sign,
   },
 })
 
