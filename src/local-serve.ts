@@ -64,7 +64,7 @@ function runLocalServer({port, path}: Args) {
     })
 
     app.notFound((c) => {
-        return c.text('Not found', 404)
+        return c.text(`Not found: ${c.req.path}`, 404)
     })
 
 
@@ -150,10 +150,6 @@ const renderGemtext = createMiddleware(async (c, next) => {
         .pipeThrough(toTransformStream(gmiLinesToHtml))
         .pipeThrough(new TextEncoderStream())
 
-    // TODO: I can probably do this in a streaming fashion, spitting out an HTML head, converting by lines, and then an HTML footer.
-    // For now, just doing a whole-document conversion:
-    // const gemText = await oldResponse.text()
-    // const gemLines = [...gmi.parseDocument(gemText)]
 
     c.res = new Response(newStream, {
         headers: {
@@ -186,9 +182,17 @@ async function * gmiLinesToHtml(lines: AsyncIterable<gmi.Line>): AsyncGenerator<
         } else if (line.type == "link") {
             const {urlOrPath} = line
             const text = line.linkText ?? urlOrPath
-            yield html`<p><a href="${urlOrPath}">${text}</a></p>\n`
+            yield html`<p><a href="${encodeURI(urlOrPath)}">${text}</a></p>\n`
         } else if (line.type == "pre") {
             yield html`<pre>${line.lines.join("\n")}</pre>\n`
+        } else if (line.type == "listItem") {
+            yield html`<li>${line.text}</li>\n`
+        } else if (line.type == "blockQuote") {
+            yield html`<blockquote>\n`
+            for (const innerLine of line.lines) {
+                yield html` <p>${innerLine}</p>\n`
+            }
+            yield html`</blockquote>\n`
         } else {
             const lineType: never = line
             throw new Error(`Unhandled line type: ${(lineType as gmi.Line).type}`)
@@ -205,18 +209,34 @@ html {
     background-color: rgb(255, 255, 209);
     opacity: 0.75;
     word-wrap: break-word;
+    text-align: justify;
 }
 body {
     padding: 1rem;
     margin: 0 auto;
-    &:not(:has(pre)) { max-width: 45rem; }
+    max-width: 40rem;
 }
 p, h1, h2, h3, pre {
     margin: 0 0;
     min-height: 1em;
 }
+pre {
+    overflow-x: auto;
+}
 body > h1:first-child { text-align: center; }
-p { line-height: 1.5; }
+p, li, pre { line-height: 1.5; }
+li {
+    list-style: inside;
+}
+
+blockquote {
+    // background-color: white;
+    margin: 0 1em;
+    border-left: 2px solid rgba(0, 0, 0, 0.5);
+    padding-left: 1em;
+    margin-left: 0;
+}
+
 </style>
 `
 
