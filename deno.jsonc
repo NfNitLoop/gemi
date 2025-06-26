@@ -5,6 +5,7 @@
     "dev": "deno run -ERWN --check --watch src/main.ts localServer --serveDir content"
   },
   "imports": {
+    "@david/dax": "jsr:@david/dax@^0.43.2",
     "@hono/hono": "jsr:@hono/hono@^4.8.2",
     "@noble/ed25519": "jsr:@noble/ed25519@^2.3.0",
     "@noble/hashes": "jsr:@noble/hashes@^1.8.0",

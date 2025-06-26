@@ -9,10 +9,9 @@ import { accepts } from "@hono/hono/accepts"
 import * as honoMime from "@hono/hono/utils/mime"
 
 import * as gmi from "./lib/gemtext.ts"
-import { HtmlEscapedString } from "@hono/hono/utils/html";
 import { Result } from "./lib/result.ts";
 import { TextLineStream, toTransformStream } from "@std/streams";
-
+import { $, Path } from "@david/dax"
 export const localServer = command({
     handler: runLocalServer,
     name: "localServer",
@@ -230,7 +229,6 @@ li {
 }
 
 blockquote {
-    // background-color: white;
     margin: 0 1em;
     border-left: 2px solid rgba(0, 0, 0, 0.5);
     padding-left: 1em;
@@ -245,7 +243,7 @@ blockquote {
 // Plus, it uses sync functions. (😱)
 // So, writing my own handler here.
 class StaticFiles {
-    rootDir: string
+    rootDir: Path
     indexes: string[]
     mimes: { [x: string]: string; };
     listDirectory?: (args: {relPath: string, fullPath: string}) => Promise<Response>
@@ -258,7 +256,7 @@ class StaticFiles {
     }) {
         const {rootDir, extraMimes, indexes, listDirectory} = args
         
-        this.rootDir = rootDir
+        this.rootDir = $.path(rootDir)
         this.indexes = indexes ?? []
         this.mimes = {
             ...honoMime.mimes,
@@ -269,8 +267,16 @@ class StaticFiles {
 
     // TODO: Disallow /../ !!!!
     async serveFile(relPath: string): Promise<Response|null> {
-        const fullPath = this.#join(this.rootDir, relPath)
-        const file = await openFile(fullPath)
+        const pathParts = relPath.split(/[/\\]/)
+        if (this.#blockedPath(pathParts)) {
+            return null
+        }
+        const fullPath = this.rootDir.join(...pathParts)
+        if (!fullPath.startsWith(this.rootDir)) {
+            console.warn(`Path "${relPath}" exited the root path!?`)
+            return null
+        }
+        const file = await openFile(fullPath.toString())
         if (!file) { 
             // Neither a file nor directory
             return null
@@ -278,7 +284,7 @@ class StaticFiles {
         const stat = await file.stat()
         if (stat.isFile) {
             // TODO: Default to utf-8 for text types w/o encodings.
-            const mimeType = honoMime.getMimeType(fullPath, this.mimes) ?? "application/octet-stream"
+            const mimeType = honoMime.getMimeType(fullPath.basename(), this.mimes) ?? "application/octet-stream"
 
             return new Response(
                 file.readable,
@@ -312,7 +318,16 @@ class StaticFiles {
         if (!this.listDirectory) {
             return null
         }
-        return this.listDirectory({relPath, fullPath})
+        return this.listDirectory({relPath, fullPath: fullPath.toString()})
+    }
+
+    #blockedPath(parts: string[]) {
+        for (const part of parts) {
+            if (part.startsWith(".") && part != ".well-known") {
+                return true
+            }
+        }
+        return false
     }
 
     #join(path1: string, path2: string) {
