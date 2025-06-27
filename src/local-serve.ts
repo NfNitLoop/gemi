@@ -162,6 +162,7 @@ async function * gmiLinesToHtml(lines: AsyncIterable<gmi.Line>): AsyncGenerator<
     yield html`<!doctype html>\n`
     yield html`<html>\n`
     yield html`<head>\n`
+    yield html`<meta name="viewport" content="width=device-width, initial-scale=1.0">\n`
     yield gemStyle
     yield html`</head>\n`
     yield html`<body>\n`;
