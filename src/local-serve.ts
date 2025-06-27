@@ -225,9 +225,7 @@ pre {
 }
 body > h1:first-child { text-align: center; }
 p, li, pre { line-height: 1.5; }
-li {
-    list-style: inside;
-}
+li { margin-left: 1em; }
 
 blockquote {
     margin: 0 1em;
