@@ -14,9 +14,13 @@
     "@std/encoding": "jsr:@std/encoding@^1.0.10",
     "@std/path": "jsr:@std/path@^1.1.0",
     "@std/streams": "jsr:@std/streams@^1.0.10",
+    "@std/toml": "jsr:@std/toml@^1.0.8",
     "@std/uuid": "jsr:@std/uuid@^1.0.9",
+    "@types/luxon": "npm:@types/luxon@^3.6.2",
+    "arktype": "npm:arktype@^2.1.20",
     "bs58": "npm:bs58@^6.0.0",
     "bs58check": "npm:bs58check@^4.0.0",
-    "cmd-ts": "npm:cmd-ts@^0.13.0"
+    "cmd-ts": "npm:cmd-ts@^0.13.0",
+    "luxon": "npm:luxon@^3.6.1"
   }
 }

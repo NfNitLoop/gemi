@@ -6,7 +6,7 @@
  * 
  */
 
-import {toTransformStream} from "@std/streams"
+import {TextLineStream, toTransformStream} from "@std/streams"
 
 export const extensions = [`.gmi`, `.gmni`, `.gemini`] as const
 export const mimeType = "text/gemini"
@@ -24,14 +24,14 @@ export function hasExtension(fileName: string): boolean {
     return extensions.some(ext => fileName.endsWith(ext))
 }
 
-export type GemtextDoc = {
-    title?: string
-    readonly lines: Readonly<Line[]>
-    readonly links: Readonly<Link[]>
-}
-
 export function newStreamParser(): TransformStream<string, Line> {
     return toTransformStream(parseLines)
+}
+
+export function parseByteStream(stream: ReadableStream<Uint8Array>): AsyncIterable<Line> {
+    return stream.pipeThrough(new TextDecoderStream())
+        .pipeThrough(new TextLineStream())
+        .pipeThrough(newStreamParser())
 }
 
 
