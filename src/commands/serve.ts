@@ -1,21 +1,21 @@
 import { command } from "cmd-ts";
 
 import * as cts from "cmd-ts"
-import { logger } from "@hono/hono/logger"
 import { createMiddleware, createFactory } from "@hono/hono/factory"
 import { html } from "@hono/hono/html"
 import { accepts } from "@hono/hono/accepts"
 
 import * as honoMime from "@hono/hono/utils/mime"
 
-import * as gmi from "./lib/gemtext.ts"
-import { Result } from "./lib/result.ts";
+import * as gmi from "../lib/gemtext.ts"
+import { Result } from "../lib/result.ts";
 import { TextLineStream, toTransformStream } from "@std/streams";
-import { $, Path } from "@david/dax"
-export const localServer = command({
+import { $, type Path } from "@david/dax"
+
+export const serve = command({
     handler: runLocalServer,
-    name: "localServer",
-    description: "Run a local server for some content",
+    name: "serve",
+    description: "Start up a simple HTTP server.",
     args: {
         port: cts.option({long: "port", type: cts.number, defaultValue: () => 8080}),
         path: cts.option({long: "serveDir", defaultValue: () => "."})
@@ -42,7 +42,7 @@ function runLocalServer({port, path}: Args) {
 
     const app = factory.createApp()
     // Must register middleware before routes:
-    app.use(logger())
+    app.use(logger)
     app.use(renderGemtext)
 
 
@@ -67,8 +67,25 @@ function runLocalServer({port, path}: Args) {
     })
 
 
+    console.log(`Serving path: ${$.path(path).resolve()}`)
     Deno.serve({port}, app.fetch)
 }
+
+const logger = createMiddleware(async (ctx, next) => {
+    const {req} = ctx
+    const started = Date.now()
+
+    const result = await Result.try(next())
+
+    const elapsed = Date.now() - started
+    const {res} = ctx
+    const typeInfo = (res.headers.get("content-type") ?? "").startsWith("text/gemini") ? "Gemtext! 🎉" : ''
+    console.log(req.method, res.status, `${elapsed}ms`, req.path, typeInfo)
+    
+    if (result.isError) {
+        throw result.error
+    }
+})
 
 const factory = createFactory({
     defaultAppOptions: {
@@ -255,7 +272,7 @@ class StaticFiles {
     }) {
         const {rootDir, extraMimes, indexes, listDirectory} = args
         
-        this.rootDir = $.path(rootDir)
+        this.rootDir = $.path(rootDir).resolve()
         this.indexes = indexes ?? []
         this.mimes = {
             ...honoMime.mimes,
@@ -264,7 +281,6 @@ class StaticFiles {
         this.listDirectory = listDirectory
     }
 
-    // TODO: Disallow /../ !!!!
     async serveFile(relPath: string): Promise<Response|null> {
         const pathParts = relPath.split(/[/\\]/)
         if (this.#blockedPath(pathParts)) {
@@ -272,7 +288,7 @@ class StaticFiles {
         }
         const fullPath = this.rootDir.join(...pathParts)
         if (!fullPath.startsWith(this.rootDir)) {
-            console.warn(`Path "${relPath}" exited the root path!?`)
+            console.warn(`Path "${relPath}" exited the root path!? (${this.rootDir})`)
             return null
         }
         const file = await openFile(fullPath.toString())

@@ -1,4 +1,4 @@
-// TODO: I should really put this somewhere usable already.
+// TODO: I should really put this somewhere reusable already.
 
 
 export type Result<T, E> = Ok<T> | Err<E>

@@ -1,8 +1,32 @@
 {
+  "name": "@nfnitloop/gemi",
+  "version": "0.0.1",
+  "exports": {
+    ".": "./src/main.ts"
+  },
   "tasks": {
     "run": "./src/main.ts",
-    "install": "deno install --config deno.jsonc --force --global --name dko -ERW src/main.ts",
-    "dev": "deno run -ERWN --check --watch src/main.ts localServer --serveDir content"
+
+    "install": {
+      "description": "Install the script globally.",
+      "command": "deno install --config deno.jsonc --force --global --name gemi -ERWN src/main.ts",
+    },
+    
+    "dev": {
+      "description": "Start a development server that will automatically restart when source code is modified",
+      "command": "deno run -ERWN --check --watch src/main.ts serve --serveDir content",
+    },
+    "test": {
+      "description": "Run all tests/checks",
+      "dependencies": [
+        "check:types",
+        "check:publish",
+        "check:lint",
+      ]
+    },
+    "check:types": { "command": "deno check src/main.ts", },
+    "check:publish": "deno publish --dry-run --allow-dirty",
+    "check:lint": "deno lint"
   },
   "imports": {
     "@david/dax": "jsr:@david/dax@^0.43.2",

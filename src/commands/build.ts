@@ -1,9 +1,9 @@
 import { type } from "arktype";
 import { command } from "cmd-ts";
 import * as cts from "cmd-ts";
-import { $, Path } from "@david/dax";
+import { $, type Path } from "@david/dax";
 import * as toml from "@std/toml";
-import { Line, parseByteStream } from "../lib/gemtext.ts";
+import { type Line, parseByteStream } from "../lib/gemtext.ts";
 import {DateTime} from "luxon"
 
 export const build = command({
