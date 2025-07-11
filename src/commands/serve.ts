@@ -372,7 +372,7 @@ class StaticFiles {
             return null
         }
         if (!relPath.endsWith("/") && relPath != "") {
-            const newPath = relPath + "/"
+            const newPath = `/${relPath}/`
             return new Response("", {
                 headers: {"Location": newPath},
                 status: 302 // temporary redirect
