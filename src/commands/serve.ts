@@ -2,7 +2,7 @@ import { command } from "cmd-ts";
 
 import * as cts from "cmd-ts"
 import { createMiddleware, createFactory } from "@hono/hono/factory"
-import { html } from "@hono/hono/html"
+import { html, raw } from "@hono/hono/html"
 import { accepts } from "@hono/hono/accepts"
 
 import * as honoMime from "@hono/hono/utils/mime"
@@ -11,6 +11,7 @@ import * as gmi from "../lib/gemtext.ts"
 import { Result } from "../lib/result.ts";
 import { TextLineStream, toTransformStream } from "@std/streams";
 import { $, type Path } from "@david/dax"
+import type { MiddlewareHandler } from "@hono/hono/types";
 
 export const serve = command({
     handler: runLocalServer,
@@ -27,7 +28,11 @@ type Args = {
     path: string
 }
 
-function runLocalServer({port, path}: Args) {
+async function runLocalServer({port, path}: Args) {
+
+    const server = new Server({
+        rootDir: $.path(path)
+    })
 
     const staticFiles = new StaticFiles({
         rootDir: path,
@@ -43,7 +48,7 @@ function runLocalServer({port, path}: Args) {
     const app = factory.createApp()
     // Must register middleware before routes:
     app.use(logger)
-    app.use(renderGemtext)
+    app.use(server.gemToHtml)
 
 
     app.get(`/:pathRest{.*}`, async (c, next) => {
@@ -68,8 +73,13 @@ function runLocalServer({port, path}: Args) {
 
 
     console.log(`Serving path: ${$.path(path).resolve()}`)
+    if (await server.style.exists()) {
+        console.log(`Found styles: ${server.style} ✅`)
+    }
     Deno.serve({port}, app.fetch)
 }
+
+
 
 const logger = createMiddleware(async (ctx, next) => {
     const {req} = ctx
@@ -94,7 +104,7 @@ const factory = createFactory({
 })
 
 /**
- * Returns a handler that can 
+ * Returns a handler that can generate a directory listing.
  */
 async function showListing(args: {fullPath: string, relPath: string}): Promise<Response> {
     const {fullPath, relPath} = args
@@ -121,109 +131,135 @@ async function showListing(args: {fullPath: string, relPath: string}): Promise<R
     })
 }
 
-/**
- * Convert Gemini texts to HTML for browsers that don't know what to do with it.
- */
-const renderGemtext = createMiddleware(async (c, next) => {
-    await next()
+class Server {
+    rootDir: Path
+    style: Path
 
-    const contentType = c.res.headers.get("content-type")
-    const isGemini = contentType?.startsWith(gmi.mimeType)
-    if (!isGemini) {
-        // nothing to do:
-        return
+    constructor(args: {rootDir: Path}) {
+        this.rootDir = args.rootDir.resolve()
+        this.style = this.rootDir.resolve("style.css")
     }
 
-    const outputType = accepts(c, {
-        header: "Accept",
-        supports: [
-            gmi.mimeType,
-            "text/html"
-        ],
-        // Most browsers don't know how to render gemini.
-        // default: "text/html"
-        // However, they generally provide an Accept header with html.
-        // For anything else (ex: curl) just return Gemtext:
-        default: gmi.mimeType
-    })
-
-    if (outputType == gmi.mimeType) {
-        // input & output agree! 🎉
-        return
+    async getStyle() {
+        const text = await this.style.readMaybeText()
+        return text ?? defaultStyle
     }
 
-    const oldResponse = c.res
+    /**
+     * Convert Gemini texts to HTML for browsers that don't know what to do with it.
+     */
+    readonly gemToHtml: MiddlewareHandler = async (c, next) => {
+        await next()
 
-    const {body} = oldResponse
-    if (!body) {
-        console.warn("old response had no body!?")
-        return
-    }
-
-    const newStream = body.pipeThrough(new TextDecoderStream())
-        .pipeThrough(new TextLineStream())
-        .pipeThrough(gmi.newStreamParser())
-        .pipeThrough(toTransformStream(gmiLinesToHtml))
-        .pipeThrough(new TextEncoderStream())
-
-
-    c.res = new Response(newStream, {
-        headers: {
-            "Content-Type": "text/html; charset=utf-8"
+        const contentType = c.res.headers.get("content-type")
+        const isGemini = contentType?.startsWith(gmi.mimeType)
+        if (!isGemini) {
+            // nothing to do:
+            return
         }
-    })
-    // TODO: Copy other headers?
-})
 
-async function * gmiLinesToHtml(lines: AsyncIterable<gmi.Line>): AsyncGenerator<string> {
-    yield html`<!doctype html>\n`
-    yield html`<html>\n`
-    yield html`<head>\n`
-    yield html`<meta name="viewport" content="width=device-width, initial-scale=1.0">\n`
-    yield gemStyle
-    yield html`</head>\n`
-    yield html`<body>\n`;
-    
-    // TODO: Peek at the first line to see if it's a title.
+        const outputType = accepts(c, {
+            header: "Accept",
+            supports: [
+                gmi.mimeType,
+                "text/html"
+            ],
+            // Most browsers don't know how to render gemini.
+            // However, they generally provide an Accept header with html.
+            // For anything else (ex: curl) just return Gemtext:
+            default: gmi.mimeType
+        })
 
-    for await (const line of lines) {
-        if (line.type == "text") {
-            yield html`<p>${line.text}</p>\n`
-        } else if (line.type == "heading") {
-            const {level, text} = line
-            yield (
-                level == 1 ? html`<h1>${text}</h1>\n`
-                : level == 2 ? html`<h2>${text}</h2>\n`
-                : html`<h3>${text}</h3>\n`
-            )
-        } else if (line.type == "link") {
-            const {urlOrPath} = line
-            const text = line.linkText ?? urlOrPath
-            yield html`<p><a href="${encodeURI(urlOrPath)}">${text}</a></p>\n`
-        } else if (line.type == "pre") {
-            yield html`<pre>${line.lines.join("\n")}</pre>\n`
-        } else if (line.type == "listItem") {
-            yield html`<li>${line.text}</li>\n`
-        } else if (line.type == "blockQuote") {
-            yield html`<blockquote>\n`
-            for (const innerLine of line.lines) {
-                yield html` <p>${innerLine}</p>\n`
+        if (outputType == gmi.mimeType) {
+            // input & output agree! 🎉
+            return
+        }
+
+        const oldResponse = c.res
+
+        const {body} = oldResponse
+        if (!body) {
+            console.warn("old response had no body!?")
+            return
+        }
+
+        const newStream = body.pipeThrough(new TextDecoderStream())
+            .pipeThrough(new TextLineStream())
+            .pipeThrough(gmi.newStreamParser())
+            .pipeThrough(toTransformStream(this.gmiLinesToHtml.bind(this)))
+            .pipeThrough(new TextEncoderStream())
+
+
+        c.res = new Response(newStream, {
+            headers: {
+                "Content-Type": "text/html; charset=utf-8"
             }
-            yield html`</blockquote>\n`
-        } else {
-            const lineType: never = line
-            throw new Error(`Unhandled line type: ${(lineType as gmi.Line).type}`)
-        }
+        })
+        // TODO: Copy other headers?
     }
-    yield html`</body>`
-    yield html`</html>`
+
+    async * gmiLinesToHtml(lines: AsyncIterable<gmi.Line>): AsyncGenerator<string> {
+        yield html`<!doctype html>\n`
+        yield html`<html>\n`
+        yield html`<head>\n`
+        yield html`<meta name="viewport" content="width=device-width, initial-scale=1.0">\n`
+
+        yield html`<style>\n`
+        yield raw(await this.getStyle())
+        yield `\n`
+        yield html`</style>\n`
+
+        yield html`</head>\n`
+        yield html`<body>\n`;
+        
+        // TODO: Peek at the first line to see if it's a title.
+
+        for await (const line of lines) {
+            if (line.type == "text") {
+                yield html`<p>${line.text}</p>\n`
+            } else if (line.type == "heading") {
+                const {level, text} = line
+                yield (
+                    level == 1 ? html`<h1>${text}</h1>\n`
+                    : level == 2 ? html`<h2>${text}</h2>\n`
+                    : html`<h3>${text}</h3>\n`
+                )
+            } else if (line.type == "link") {
+                const {urlOrPath} = line
+                const text = line.linkText ?? urlOrPath
+                yield html`<p><a href="${encodeURI(urlOrPath)}">${text}</a></p>\n`
+            } else if (line.type == "pre") {
+                yield html`<pre>${line.lines.join("\n")}</pre>\n`
+            } else if (line.type == "listItem") {
+                yield html`<li>${line.text}</li>\n`
+            } else if (line.type == "blockQuote") {
+                yield html`<blockquote>\n`
+                for (const innerLine of line.lines) {
+                    yield html` <p>${innerLine}</p>\n`
+                }
+                yield html`</blockquote>\n`
+            } else {
+                const lineType: never = line
+                throw new Error(`Unhandled line type: ${(lineType as gmi.Line).type}`)
+            }
+        }
+        yield html`</body>`
+        yield html`</html>`
+    }
+
 }
 
-const gemStyle = html`
-<style>
+
+
+
+
+
+
+
+
+const defaultStyle = `
 html {
     font-family: sans-serif;
-    background-color: rgb(255, 255, 209);
     opacity: 0.75;
     word-wrap: break-word;
     text-align: justify;
@@ -250,9 +286,8 @@ blockquote {
     padding-left: 1em;
     margin-left: 0;
 }
+`.trim()
 
-</style>
-`
 
 // Hono's serveStatic doesn't seem to serve index files.
 // Also, you can't easily call it to just serve a single file as needed.
