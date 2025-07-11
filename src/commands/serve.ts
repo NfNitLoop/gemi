@@ -198,10 +198,23 @@ class Server {
         // TODO: Copy other headers?
     }
 
-    async * gmiLinesToHtml(lines: AsyncIterable<gmi.Line>): AsyncGenerator<string> {
+    async * gmiLinesToHtml(linesInput: AsyncIterable<gmi.Line>): AsyncGenerator<string> {
+
+        const [firstLine, lines] = await asyncPeek(linesInput)
+
+        const title = (
+            firstLine.done ? undefined 
+            : firstLine.value.type != "heading" ? undefined
+            : firstLine.value.level != 1 ? undefined
+            : firstLine.value.text
+        )
+
         yield html`<!doctype html>\n`
         yield html`<html>\n`
         yield html`<head>\n`
+        if (title) {
+            yield html`<title>${title}</title>\n`
+        }
         yield html`<meta name="viewport" content="width=device-width, initial-scale=1.0">\n`
 
         yield html`<style>\n`
@@ -212,8 +225,6 @@ class Server {
         yield html`</head>\n`
         yield html`<body>\n`;
         
-        // TODO: Peek at the first line to see if it's a title.
-
         for await (const line of lines) {
             if (line.type == "text") {
                 yield html`<p>${line.text}</p>\n`
@@ -249,13 +260,27 @@ class Server {
 
 }
 
+async function asyncPeek<T>(iterable: AsyncIterable<T>): Promise<[IteratorResult<T>, AsyncIterable<T>]> {
+    const iter = iterable[Symbol.asyncIterator]()
+    const first = await iter.next()
 
+    async function * newIterable(): AsyncIterable<T> {
+        await using cleanup = new AsyncDisposableStack()
+        cleanup.defer(async () => { await iter.return?.() })
 
+        if (first.done) {
+            return
+        }
+        yield first.value
+        while (true) {
+            const next = await iter.next()
+            if (next.done) { return }
+            yield next.value
+        }
+    }
 
-
-
-
-
+    return [first, newIterable()]
+}
 
 const defaultStyle = `
 html {
