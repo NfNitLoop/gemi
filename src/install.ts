@@ -1,0 +1,27 @@
+const fullCommand = [
+    "deno", "install", "--global",
+
+    // Upgrade to newer versions if available:
+    "--force", 
+
+    // Need Read/Write for the `build` subcommand.
+    // Need network for the `serve` command.
+    // IIRC Dax & ts-cmd use `env` permissions for configuring terminal output.
+    "-RWEN",
+
+    "jsr:@nfnitloop/gemi"
+]
+
+console.log(`We will run this command to install the app:`)
+console.log(JSON.stringify(fullCommand))
+console.log()
+
+const cmd = new Deno.Command(fullCommand[0], {
+    args: fullCommand.slice(1)
+})
+
+const proc = cmd.spawn()
+const status = await proc.status
+if (!status) {
+    Deno.exit(status)
+}

@@ -1,8 +1,9 @@
 {
   "name": "@nfnitloop/gemi",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "exports": {
-    ".": "./src/main.ts"
+    ".": "./src/main.ts",
+    "./install": "./src/install.ts",
   },
   "tasks": {
     "run": "./src/main.ts",
