@@ -13,8 +13,8 @@ export const build = command({
     configPath: cts.option({
       long: "configPath",
       type: cts.string,
-      description: "Path to load the config file from",
-      defaultValue: () => "./.gemi.toml",
+      description: "Config file name to search for",
+      defaultValue: () => ".gemi.toml",
     }),
   },
   handler: buildHandler,
@@ -25,12 +25,15 @@ type Args = {
 };
 
 async function buildHandler(args: Args) {
-  const { configPath } = args;
+  const { configPath: configName } = args;
 
-  const config = await loadConfig(configPath);
+  const configFile = await findConfig(configName)
+  console.log(`Using config: ${configFile}`)
+  const config = await loadConfig(configFile);
+  const configDir = configFile.parentOrThrow()
 
   for (const root of config.roots) {
-    await doBuild($.path(configPath).parent()!, root);
+    await doBuild(configDir, root);
   }
 }
 
@@ -150,8 +153,23 @@ async function * walkDir(path: Path) {
   }
 }
 
-async function loadConfig(configPath: string) {
-  const text = await $.path(configPath).readText();
+async function findConfig(fileName: string): Promise<Path> {
+  let base = $.path(".").resolve()
+  while (true) {
+    const file = base.resolve(fileName)
+    if (await file.exists()) {
+      return file
+    }
+    const newBase = base.parent()
+    if (!newBase) {
+      throw new Error(`Couldn't find config file: ${fileName}`)
+    }
+    base = newBase
+  }
+}
+
+async function loadConfig(file: Path) {
+  const text = await file.readText();
   const config = Config.assert(toml.parse(text));
   return config;
 }
