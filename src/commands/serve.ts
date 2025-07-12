@@ -359,7 +359,11 @@ class StaticFiles {
         const stat = await file.stat()
         if (stat.isFile) {
             // TODO: Default to utf-8 for text types w/o encodings.
-            const mimeType = honoMime.getMimeType(fullPath.basename(), this.mimes) ?? "application/octet-stream"
+            let mimeType = honoMime.getMimeType(fullPath.basename().toLowerCase(), this.mimes)
+            if (!mimeType) {
+                console.warn("Unknown mime type for:", relPath)
+                mimeType = "application/octet-stream"
+            }
 
             return new Response(
                 file.readable,
