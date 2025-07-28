@@ -84,10 +84,12 @@ async function doBuild(configDir: Path, root: SiteRoot) {
     )
   }
   for (const post of posts) {
-    const day = post.date.toFormat("yyyy-MM-dd")
+    const day = post.date.toFormat("yyyy-MM-dd HH:mm:ss ZZ")
     const postDir = post.path.parentOrThrow()
     const relPath = indexOutDir.relative(postDir) + "/"
-    lines.push(`=> ${encodeURI(relPath)} ${day} ${post.title}`)
+    lines.push(`=> ${encodeURI(relPath)} ${post.title}`)
+    lines.push(day)
+    lines.push("")
     
   }
 
