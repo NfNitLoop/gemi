@@ -50,17 +50,25 @@ async function runLocalServer({port, path}: Args) {
     app.use(logger)
     app.use(server.gemToHtml)
 
-
-    app.get(`/:pathRest{.*}`, async (c, next) => {
-        const response = await staticFiles.serveFile(c.req.param().pathRest)
-        if (!response) {
-            return next()
-        }
-        return response
-    })
-
+    // Note, this SHOULD be unnecessary, since we have a pathRest match, below, but:
+    // See: https://github.com/honojs/hono/issues/4384 
+    // and: https://github.com/honojs/hono/issues/4385
     app.get("/", async (_c, next) => { 
         const response = await staticFiles.serveFile("")
+        if (response) {
+            return response
+        }
+        return next()
+    })
+
+    app.get(`/:pathRest{.*}`, async (c, next) => {
+        // See: https://github.com/honojs/hono/issues/4384 
+        const relPath: string|undefined = c.req.param("pathRest")
+        if (!relPath) {
+            return next()
+        }
+
+        const response = await staticFiles.serveFile(relPath)
         if (response) {
             return response
         }

@@ -10,12 +10,12 @@
 
     "install": {
       "description": "Install the script globally.",
-      "command": "deno install --config deno.jsonc --force --global --name gemi -ERWN src/main.ts",
+      "command": "deno install --config deno.jsonc --force --global --name gemi -ERWN --allow-sys src/main.ts",
     },
     
     "dev": {
       "description": "Start a development server that will automatically restart when source code is modified",
-      "command": "deno run -ERWN --check --watch src/main.ts serve --serveDir content",
+      "command": "deno run -ERWN --allow-sys --check --watch src/main.ts serve --serveDir content",
     },
     "test": {
       "description": "Run all tests/checks",
