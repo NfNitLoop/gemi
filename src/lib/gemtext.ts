@@ -24,63 +24,35 @@ export function hasExtension(fileName: string): boolean {
     return extensions.some(ext => fileName.endsWith(ext))
 }
 
-export function newStreamParser(): TransformStream<string, Line> {
+export function newStreamParser(): TransformStream<string, Chunk> {
     return toTransformStream(parseLines)
 }
 
-export function parseByteStream(stream: ReadableStream<Uint8Array>): AsyncIterable<Line> {
+export function parseByteStream(stream: ReadableStream<Uint8Array>): AsyncIterable<Chunk> {
     return stream.pipeThrough(new TextDecoderStream())
-        .pipeThrough(new TextLineStream())
-        .pipeThrough(newStreamParser())
+    .pipeThrough(new TextLineStream())
+    .pipeThrough(newStreamParser())
 }
 
 
-async function * parseLines(lines: AsyncIterable<string>): AsyncIterable<Line> {
-    let parsingPre: ParsingPre  = undefined;
-    let parsingBq: ParsingBlockquote = undefined;
+async function * parseLines(linesIterable: AsyncIterable<string>): AsyncIterable<Chunk> {
+    const lines = new Peeker(linesIterable[Symbol.asyncIterator]())
+    async function hasMoreLines() { return !(await lines.peek()).done }
+    
+    while (await hasMoreLines()) {
+        // These blocks take highest priority and can parse multiple lines until they reach their end delimiter:
+        const pre = await parsePreBlock(lines)
+        if (pre) { yield pre; continue }
 
-    for await (const line of lines) {
-        const pre = parsePre(line)
-        if (pre) {
-            if (parsingPre) { // Wrap up & yield parsing.
-                if (pre.info) {
-                    throw new Error(`Expected end of preformatted block but found: ${line}`)
-                }
-                const outValue = {
-                    type: "pre",
-                    lines: parsingPre.lines,
-                    info: parsingPre.info
-                } as const
-                parsingPre = undefined
-                yield outValue
-            } else { // Start parsing new pre block:
-                parsingPre = {
-                    info: pre.info,
-                    lines: []
-                }
-            }
-            continue
-        }
-        if (parsingPre) {
-            parsingPre.lines.push(line)
-            continue
-        }
-        const bq = parseBq(line)
-        if (bq) {
-            if (!parsingBq) {
-                parsingBq = { lines: [] }
-            }
-            parsingBq.lines.push(bq.line)
-            continue
-        }
-        // so: !bq. Yield the block we'd collected:
-        if (parsingBq) {
-            yield {
-                type: "blockQuote",
-                lines: parsingBq.lines
-            }
-            parsingBq = undefined
-        }
+        const bq = await parseBqBlock(lines)
+        if (bq) { yield bq; continue }
+
+        const list = await parseList(lines)
+        if (list) { yield list; continue }
+
+        // Otherwise, we're parsing one line at a time:
+        const {value: line} = await lines.next()
+
         const link = parseLink(line)
         if (link) {
             yield link
@@ -91,30 +63,42 @@ async function * parseLines(lines: AsyncIterable<string>): AsyncIterable<Line> {
             yield heading
             continue
         }
-        const li = parseListItem(line)
-        if (li) {
-            yield li
-            continue
-        }
         yield {
             type: "text",
             text: line
         }
     }
 
-    // Yield any open blocks that are now finished:
-    if (parsingPre) {
-        yield {
-            type: "pre",
-            lines: parsingPre.lines,
-            info: parsingPre.info
-        }
+}
+
+class Peeker<T> implements AsyncIterator<T> {
+    #inner: AsyncIterator<T>
+
+    #peeked: IteratorResult<T>|null = null
+    
+    constructor(inner: AsyncIterator<T>) {
+        this.#inner = inner
     }
-    if (parsingBq) {
-        yield {
-            type: "blockQuote",
-            lines: parsingBq.lines
+    
+    // deno-lint-ignore require-await
+    async next(): Promise<IteratorResult<T>> {
+        if (this.#peeked) {
+            const out = this.#peeked
+            this.#peeked = null
+            return out
         }
+
+        return this.#inner.next()
+    }
+
+    async peek(): Promise<IteratorResult<T>> {
+        this.#peeked ??= await this.#inner.next()
+        return this.#peeked
+    }
+
+    /** pop the peeked value (if it was peeked) */
+    pop(): void {
+        this.#peeked = null
     }
 }
 
@@ -132,15 +116,31 @@ function parseHeading(line: string): null | Heading {
 
 const HEADING_RE = /^(?<h>#{1,3}) (?<text>.+)$/
 
-// Remembers that we're collecting things into a <pre> block.
-type ParsingPre = undefined | {
-    info?: string
-    lines: string[]
-}
+async function parsePreBlock(lines: Peeker<string>): Promise<Preformatted|null> {
+    const first = await lines.peek()
+    if (first.done) { return null }
+    const info = parsePre(first.value)
+    if (!info) { return null }
 
-// Same, but for blockquote.
-type ParsingBlockquote = undefined | {
-    lines: string[]
+    lines.pop()
+
+    const preLines = []
+
+    while (true) {
+        const {value: line, done} = await lines.next()
+        if (done) { break }
+
+        const pre = parsePre(line)
+        if (pre) { break }
+        
+        preLines.push(line)
+    }
+
+    return {
+        type: "pre",
+        info: info.info,
+        lines: preLines,
+    }
 }
 
 function parsePre(line: string): null | { info?: string} {
@@ -154,6 +154,29 @@ function parsePre(line: string): null | { info?: string} {
 
 const PRE_RE = /^```\s*(?<info>.*)$/
 
+async function parseBqBlock(iter: Peeker<string>): Promise<BlockQuote|null> {
+    const lines: string[] = []
+
+    while (true) {
+        const {value: line, done} = await iter.peek()
+        if (done) { break }
+
+        const quoted = parseBq(line)
+        if (!quoted) { break }
+
+        lines.push(quoted.line)
+        iter.pop()
+    }
+
+    if (lines.length == 0) {
+        return null
+    }
+    return {
+        type: "blockQuote",
+        lines
+    }
+}
+
 function parseBq(line: string): null | { line: string } {
     const match = BLOCK_QUOTE_RE.exec(line)
     if (!match) { return null }
@@ -164,13 +187,33 @@ function parseBq(line: string): null | { line: string } {
 
 const BLOCK_QUOTE_RE = /^>[ ]?(?<line>.*)$/
 
-function parseListItem(line: string): null | ListItem {
-    const match = LIST_ITEM_RE.exec(line)
-    if (!match) { return null }
-    return {
-        type: "listItem",
-        text: match.groups!.text
+async function parseList(iter: Peeker<string>): Promise<List|null> {
+    const items: string[] = []
+
+    while (true) {
+        const {value: line, done} = await iter.peek()
+        if (done) { break }
+
+        const item = parseListItem(line)
+        if (item === null) { break }
+
+        items.push(item)
+        iter.pop()
     }
+
+    if (items.length == 0) {
+        return null
+    }
+
+    return {
+        type: "list",
+        items
+    }
+}
+
+function parseListItem(line: string): null | string {
+    const match = LIST_ITEM_RE.exec(line)
+    return match?.groups?.text ?? null
 }
 
 const LIST_ITEM_RE = /^[*][ ]?(?<text>.*)$/
@@ -190,16 +233,17 @@ function parseLink(line: string): Link | null {
 
 const LINK_RE = /^=> (?<urlOrPath>\S+)\s*(?<linkText>.*)$/
 
-export type Line = Heading | Text | Link | Preformatted | BlockQuote | ListItem
+export type Chunk = Heading | Text | Link | Preformatted | BlockQuote | List
 
+// TODO: Group blank lines into the previous paragraph so we can render with <br> instead of empty paragraphs?
 export type Text = {
     type: "text",
     text: string,
 }
 
-export type ListItem = {
-    type: "listItem",
-    text: string,
+export type List = {
+    type: "list",
+    items: string[]
 }
 
 export type Heading = {

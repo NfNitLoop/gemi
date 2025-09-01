@@ -210,7 +210,7 @@ class Server {
         // TODO: Copy other headers?
     }
 
-    async * gmiLinesToHtml(linesInput: AsyncIterable<gmi.Line>): AsyncGenerator<string> {
+    async * gmiLinesToHtml(linesInput: AsyncIterable<gmi.Chunk>): AsyncGenerator<string> {
 
         const [firstLine, lines] = await asyncPeek(linesInput)
 
@@ -253,8 +253,10 @@ class Server {
                 yield html`<p><a href="${encodeURI(urlOrPath)}">${text}</a></p>\n`
             } else if (line.type == "pre") {
                 yield html`<pre>${line.lines.join("\n")}</pre>\n`
-            } else if (line.type == "listItem") {
-                yield html`<li>${line.text}</li>\n`
+            } else if (line.type == "list") {
+                yield html`<ul>\n${
+                    line.items.map(item => html` <li>${item}</li>\n`)
+                }</ul>`
             } else if (line.type == "blockQuote") {
                 yield html`<blockquote>\n`
                 for (const innerLine of line.lines) {
@@ -263,7 +265,7 @@ class Server {
                 yield html`</blockquote>\n`
             } else {
                 const lineType: never = line
-                throw new Error(`Unhandled line type: ${(lineType as gmi.Line).type}`)
+                throw new Error(`Unhandled line type: ${(lineType as gmi.Chunk).type}`)
             }
         }
         yield html`</body>`
@@ -306,7 +308,7 @@ body {
     margin: 0 auto;
     max-width: 40rem;
 }
-p, h1, h2, h3, pre {
+p, h1, h2, h3, ul, pre, blockquote  {
     margin: 0 0;
     min-height: 1em;
 }
@@ -315,13 +317,10 @@ pre {
 }
 body > h1:first-child { text-align: center; }
 p, li, pre { line-height: 1.5; }
-li { margin-left: 1em; }
 
 blockquote {
-    margin: 0 1em;
     border-left: 2px solid rgba(0, 0, 0, 0.5);
     padding-left: 1em;
-    margin-left: 0;
 }
 `.trim()
 

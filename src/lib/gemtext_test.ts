@@ -1,4 +1,4 @@
-import { newStreamParser } from "./gemtext.ts"
+import { type Chunk, newStreamParser } from "./gemtext.ts"
 import { TextLineStream } from "@std/streams"
 import { assertEquals } from "@std/assert"
 
@@ -26,10 +26,13 @@ block starts
 line 2
 ${"```"}
 
+* list item 1
+* list item 2
+
 => https://www.google.com
 `.trim()
 
-const testDocExpected = [
+const testDocExpected: Chunk[] = [
     { type: "heading", level: 1, text: "This is the title" },
     { type: "text", text: "" },
     {
@@ -38,6 +41,15 @@ const testDocExpected = [
         lines: ["block starts", "line 2"],
     },
     { type: "text", text: "" },
+    {
+        type: "list",
+        items: [
+            "list item 1",
+            "list item 2",
+        ],
+    },
+    { type: "text", text: "" },
+    
     {
         type: "link",
         urlOrPath: "https://www.google.com",

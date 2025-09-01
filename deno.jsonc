@@ -23,7 +23,8 @@
         "check:types",
         "check:publish",
         "check:lint",
-      ]
+      ],
+      "command": "deno test"
     },
     "check:types": { "command": "deno check src/main.ts", },
     "check:publish": "deno publish --dry-run --allow-dirty",

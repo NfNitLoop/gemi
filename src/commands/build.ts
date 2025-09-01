@@ -3,7 +3,7 @@ import { command } from "cmd-ts";
 import * as cts from "cmd-ts";
 import { $, type Path } from "@david/dax";
 import * as toml from "@std/toml";
-import { type Line, parseByteStream } from "../lib/gemtext.ts";
+import { type Chunk, parseByteStream } from "../lib/gemtext.ts";
 import {DateTime} from "luxon"
 
 export const build = command({
@@ -114,7 +114,7 @@ function sortPosts(lhs: PostInfo, rhs: PostInfo): number {
 async function getMeta(gemtext: Path) {
   const file = await gemtext.open()
   const stream = parseByteStream(file.readable)
-  const lines: Line[] = []
+  const lines: Chunk[] = []
   for await (const line of stream) {
     if (lines.length >= 3) { break }
     lines.push(line)
