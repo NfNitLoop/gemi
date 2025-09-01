@@ -80,9 +80,9 @@ async function runLocalServer({port, path}: Args) {
     })
 
 
-    console.log(`Serving path: ${$.path(path).resolve()}`)
+    console.log(`✅ Serving path: ${$.path(path).resolve()}`)
     if (await server.style.exists()) {
-        console.log(`Found styles: ${server.style} ✅`)
+        console.log(`✅ Found styles: ${server.style}`)
     }
     Deno.serve({port}, app.fetch)
 }
@@ -95,10 +95,14 @@ const logger = createMiddleware(async (ctx, next) => {
 
     const result = await Result.try(next())
 
-    const elapsed = Date.now() - started
+    const ended = new Date()
+    const elapsed = ended.valueOf() - started
+    const timestamp = `[${ended.toISOString()}]`
+
     const {res} = ctx
     const typeInfo = (res.headers.get("content-type") ?? "").startsWith("text/gemini") ? "Gemtext! 🎉" : ''
-    console.log(req.method, res.status, `${elapsed}ms`, req.path, typeInfo)
+
+    console.log(timestamp, req.method, res.status, `${elapsed}ms`, req.path, typeInfo)
     
     if (result.isError) {
         throw result.error
